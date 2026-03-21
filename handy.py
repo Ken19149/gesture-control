@@ -5,7 +5,8 @@ from mediapipe.tasks.python import vision
 import urllib.request
 import os
 import time
-import math  # Added for distance calculation
+import math
+from collections import deque  # Added to track the finger path
 
 # --- Trackpad Configuration ---
 SENSITIVITY = 3.5  
@@ -24,15 +25,20 @@ detector = vision.HandLandmarker.create_from_options(options)
 pointer_prev_x, pointer_prev_y = None, None
 last_waybar_time = 0
 last_workspace_time = 0
-last_click_time = 0  # Timer for the click debounce
+last_click_time = 0
 fist_start_time = 0
 
+# --- New Gesture Variables ---
+trail = deque(maxlen=30)  # Remembers the last 30 positions of your index finger
+last_rofi_time = 0
+
 COOLDOWN = 1.0  
-CLICK_COOLDOWN = 0.3  # Prevents machine-gun clicking
+CLICK_COOLDOWN = 0.3  
+ROFI_COOLDOWN = 2.0       # Prevent rofi from spawning 5 times in a row
 FIST_HOLD_TIME = 0.2  
 SWIPE_Y_THRESHOLD = 0.08  
 SWIPE_X_THRESHOLD = 0.15  
-CLICK_THRESHOLD = 0.04    # How close the thumb must get to the index base (normalized)
+CLICK_THRESHOLD = 0.04    
 
 # 3. Hook into RGB camera
 cap = cv2.VideoCapture(0)
@@ -49,7 +55,6 @@ while cap.isOpened():
     
     if detection_result.hand_landmarks:
         for hand_landmarks in detection_result.hand_landmarks:
-            # All the finger joints we need
             thumb_tip = hand_landmarks[4]
             index_base = hand_landmarks[5]
             
@@ -72,22 +77,51 @@ while cap.isOpened():
             index_curled = index_tip.y > index_pip.y
             middle_curled = middle_tip.y > middle_pip.y
 
-            # --- GESTURE 1: POINTER MODE & CLICKING ---
+            # --- GESTURE 1: POINTER MODE, CLICKING & CIRCLES ---
             if index_up and not middle_up and ring_down and pinky_down:
                 fist_start_time = 0 
                 ix, iy = int(index_tip.x * w), int(index_tip.y * h)
                 cv2.circle(img, (ix, iy), 15, (0, 255, 255), cv2.FILLED)
                 
-                # --- The Thumb Click Logic ---
-                # Calculate the 2D distance between Thumb Tip and Index Base
-                thumb_dist = math.hypot(thumb_tip.x - index_base.x, thumb_tip.y - index_base.y)
+                # --- The "Ink" Trail Logic ---
+                trail.append((ix, iy))
                 
-                if thumb_dist < CLICK_THRESHOLD:
-                    # Draw a bright red circle on the thumb when it clicks
-                    cv2.circle(img, (int(thumb_tip.x * w), int(thumb_tip.y * h)), 20, (0, 0, 255), cv2.FILLED)
+                # Draw the glowing path
+                for i in range(1, len(trail)):
+                    cv2.line(img, trail[i-1], trail[i], (0, 255, 255), 3)
+
+                # --- The Circle Detection Math ---
+                if len(trail) == 30 and (current_time - last_rofi_time > ROFI_COOLDOWN):
+                    # Find the bounding box of your drawing
+                    min_x = min([p[0] for p in trail])
+                    max_x = max([p[0] for p in trail])
+                    min_y = min([p[1] for p in trail])
+                    max_y = max([p[1] for p in trail])
                     
+                    box_w = max_x - min_x
+                    box_h = max_y - min_y
+                    
+                    # 1. Is the drawing big enough? (At least 80x80 camera pixels)
+                    if box_w > 80 and box_h > 80:
+                        # 2. Is it roughly a square shape (not a long line)?
+                        if 0.7 < (box_w / box_h) < 1.3:
+                            # 3. Did you close the loop? (Distance from start of trail to end of trail)
+                            start_p = trail[0]
+                            end_p = trail[-1]
+                            dist_closed = math.hypot(start_p[0] - end_p[0], start_p[1] - end_p[1])
+                            
+                            if dist_closed < 60:
+                                print("CIRCLE DETECTED! Launching Rofi...")
+                                # Launches Rofi with a massive, centered 3x3 icon grid
+                                os.system("rofi -show drun -show-icons -theme ~/.config/rofi/gesture.rasi &")
+                                last_rofi_time = current_time
+                                trail.clear()  # Erase the ink so it doesn't double-trigger
+
+                # --- The Thumb Click Logic ---
+                thumb_dist = math.hypot(thumb_tip.x - index_base.x, thumb_tip.y - index_base.y)
+                if thumb_dist < CLICK_THRESHOLD:
+                    cv2.circle(img, (int(thumb_tip.x * w), int(thumb_tip.y * h)), 20, (0, 0, 255), cv2.FILLED)
                     if current_time - last_click_time > CLICK_COOLDOWN:
-                        print("LEFT CLICK!")
                         os.system("ydotool click 0xC0")
                         last_click_time = current_time
 
@@ -110,6 +144,7 @@ while cap.isOpened():
             elif index_up and middle_up and ring_down and pinky_down:
                 pointer_prev_x = None 
                 fist_start_time = 0 
+                trail.clear() # Erase ink if gesture changes
                 
                 cv2.circle(img, (int(index_tip.x * w), int(index_tip.y * h)), 10, (255, 0, 0), cv2.FILLED)
                 cv2.circle(img, (int(middle_tip.x * w), int(middle_tip.y * h)), 10, (255, 0, 0), cv2.FILLED)
@@ -127,6 +162,8 @@ while cap.isOpened():
             # --- GESTURE 3: WORKSPACE GRAB ---
             elif index_curled and middle_curled and ring_down and pinky_down:
                 pointer_prev_x = None 
+                trail.clear() # Erase ink if gesture changes
+                
                 if fist_start_time == 0:
                     fist_start_time = current_time
                 
@@ -146,6 +183,7 @@ while cap.isOpened():
             else:
                 fist_start_time = 0
                 pointer_prev_x = None
+                trail.clear() # Erase ink if you put your hand down
 
     cv2.imshow("Greasy Hands Protocol", img)
     if cv2.waitKey(1) & 0xFF == ord('q'): break
