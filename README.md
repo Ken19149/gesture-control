@@ -10,8 +10,7 @@ using hand gestures to control pc
 - right thumb to middle knuckle = right click
 - right hand thumb up = enter/return
 - right pinky up = esc
-
-grab/fist swipe left/right = switch workspace  
+- grab/fist swipe left/right = switch workspace  
 
 # todo
 - hold left / hold right
@@ -20,8 +19,9 @@ grab/fist swipe left/right = switch workspace
 - combo
 - screenshot
 - toggle handy on/off
+  
+- rofi common app on top
 
-bugs: 
+# bugs: 
 - left click triggers before right click
 
-- rofi common app on top
