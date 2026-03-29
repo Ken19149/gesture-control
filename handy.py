@@ -7,6 +7,7 @@ import os
 import time
 import math
 from collections import deque
+import subprocess
 
 # --- Trackpad Configuration ---
 SENSITIVITY = 3.5  
@@ -63,7 +64,6 @@ last_enter_time = 0
 last_esc_time = 0
 last_toggle_time = 0  
 fist_start_time = 0
-trail = deque(maxlen=30)  
 last_rofi_time = 0
 peace_held = False
 gojo_held = False
@@ -84,10 +84,12 @@ SWIPE_Y_THRESHOLD = 0.08
 SWIPE_X_THRESHOLD = 0.25  
 CLICK_THRESHOLD = 0.04    
 TUCK_THRESHOLD = 0.08  
-PIANO_THRESHOLD = 0.03
+PIANO_THRESHOLD = 0.025
 
 # 3. Hook into RGB camera
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+cap.set(cv2.CAP_PROP_FPS, 60)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)      
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)   
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -106,7 +108,6 @@ try:
                 for k in key_states: update_key(k, False)
                 joy_center = None
                 pointer_prev_x = None
-                trail.clear()
                 
                 # SAFETY CATCH: Release mouse buttons
                 if left_is_holding:
@@ -189,7 +190,6 @@ try:
                                     for k in key_states: update_key(k, False)
                                     joy_center = None
                                     pointer_prev_x = None
-                                    trail.clear()
                                     left_scroll_anchor = None
                                     
                                     if left_is_holding:
@@ -204,12 +204,18 @@ try:
                             # --- DOMAIN EXPANSION: Hexecute Mode ---
                             peace_held = False 
                             if not gojo_held:
-                                print("DOMAIN EXPANSION: Ready to cast!")
-                                gojo_held = True 
+                                print("DOMAIN EXPANSION: Casting Hexecute!")
+                                # Inject your Hexecute trigger down here! 
+                                # (e.g., 0x42 is Middle Mouse Down)
+                                os.system("ydotool click 0x42") # Need to update this
+                                gojo_held = True
                             continue 
                     else:
                         peace_held = False
-                        gojo_held = False 
+                        if gojo_held:
+                            print("DOMAIN EXPANSION: Spell Released!")
+                            os.system("ydotool click 0x82") # Middle Mouse UP
+                            gojo_held = False
 
                     # =======================================================
                     # ONLY RUN THESE LEFT-HAND GESTURES IF SYSTEM IS ENABLED
@@ -274,38 +280,37 @@ try:
                             update_key('A', palm_x < joy_center[0] - JOY_DEADZONE)
                             update_key('D', palm_x > joy_center[0] + JOY_DEADZONE)
 
-                            # --- THE THUMB PIANO (Shift, Ctrl, Space) ---
-                            index_knuckle = hand_landmarks[5]
-                            thumb_base = hand_landmarks[2] # Move Ctrl away from the index finger
-                            pinky_knuckle = hand_landmarks[17]
+                            # --- THE FINGERTIP PIANO (Shift, Space, Ctrl) ---
+                            # Apple Vision Pro / Meta Quest style pinch detection
                             
-                            dist_shift = math.hypot(thumb_tip.x - index_knuckle.x, thumb_tip.y - index_knuckle.y)
-                            # Ctrl is now triggered by curling your thumb straight down to its own base joint
-                            dist_ctrl = math.hypot(thumb_tip.x - thumb_base.x, thumb_tip.y - thumb_base.y) 
-                            dist_space = math.hypot(thumb_tip.x - pinky_knuckle.x, thumb_tip.y - pinky_knuckle.y)
+                            dist_shift = math.hypot(thumb_tip.x - index_tip.x, thumb_tip.y - index_tip.y)
+                            dist_space = math.hypot(thumb_tip.x - middle_tip.x, thumb_tip.y - middle_tip.y) 
+                            dist_ctrl  = math.hypot(thumb_tip.x - ring_tip.x, thumb_tip.y - ring_tip.y)
                             
-                            # Find the absolute closest anchor to the thumb
-                            closest_dist = min(dist_shift, dist_ctrl, dist_space)
+                            # Find the absolute closest fingertip to the thumb
+                            closest_dist = min(dist_shift, dist_space, dist_ctrl)
                             
-                            # Only activate IF it's the closest key AND it's inside the tighter piano radius
-                            shift_active = (closest_dist == dist_shift) and (dist_shift < PIANO_THRESHOLD)
-                            ctrl_active = (closest_dist == dist_ctrl) and (dist_ctrl < PIANO_THRESHOLD)
-                            space_active = (closest_dist == dist_space) and (dist_space < PIANO_THRESHOLD)
+                            # PINCH THRESHOLD: We can use a tight 0.03 because fingertips are so distinct
+                            PINCH_THRESHOLD = 0.03 
+                            
+                            shift_active = (closest_dist == dist_shift) and (dist_shift < PINCH_THRESHOLD)
+                            space_active = (closest_dist == dist_space) and (dist_space < PINCH_THRESHOLD)
+                            ctrl_active  = (closest_dist == dist_ctrl)  and (dist_ctrl < PINCH_THRESHOLD)
                             
                             update_key('LSHIFT', shift_active)
-                            update_key('LCTRL', ctrl_active)
                             update_key('SPACE', space_active)
+                            update_key('LCTRL', ctrl_active)
                             
                             # Visual Feedback
                             if shift_active:
-                                cv2.circle(img, (int(thumb_tip.x * w), int(thumb_tip.y * h)), 20, (255, 100, 0), cv2.FILLED)
+                                cv2.circle(img, (int(index_tip.x * w), int(index_tip.y * h)), 20, (255, 100, 0), cv2.FILLED)
                                 cv2.putText(img, "SHIFT", (cx - 50, cy - 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 100, 0), 2)
-                            elif ctrl_active:
-                                cv2.circle(img, (int(thumb_tip.x * w), int(thumb_tip.y * h)), 20, (0, 100, 255), cv2.FILLED)
-                                cv2.putText(img, "CTRL", (cx - 50, cy - 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 100, 255), 2)
                             elif space_active:
-                                cv2.circle(img, (int(thumb_tip.x * w), int(thumb_tip.y * h)), 20, (255, 255, 0), cv2.FILLED)
+                                cv2.circle(img, (int(middle_tip.x * w), int(middle_tip.y * h)), 20, (255, 255, 0), cv2.FILLED)
                                 cv2.putText(img, "SPACE", (cx - 50, cy - 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+                            elif ctrl_active:
+                                cv2.circle(img, (int(ring_tip.x * w), int(ring_tip.y * h)), 20, (0, 100, 255), cv2.FILLED)
+                                cv2.putText(img, "CTRL", (cx - 50, cy - 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 100, 255), 2)
                         
                         # --- SAFETY RESET ---
                         else:
@@ -313,28 +318,18 @@ try:
                                 for k in key_states: update_key(k, False)
                                 joy_center = None
 
-                # ==========================================
+               # ==========================================
                 # RIGHT HAND (Only process if enabled)
                 # ==========================================
                 elif gestures_enabled:
+                    
+                    # --- 1. POINTING & MOUSE MOVEMENT ---
                     if index_up and middle_curled and ring_curled and pinky_curled:
                         fist_start_time = 0 
                         ix, iy = int(index_tip.x * w), int(index_tip.y * h)
-                        cv2.circle(img, (ix, iy), 15, (0, 255, 255), cv2.FILLED)
                         
-                        trail.append((ix, iy))
-                        for i in range(1, len(trail)): cv2.line(img, trail[i-1], trail[i], (0, 255, 255), 3)
-
-                        if len(trail) == 30 and (current_time - last_rofi_time > ROFI_COOLDOWN):
-                            min_x, max_x = min([p[0] for p in trail]), max([p[0] for p in trail])
-                            min_y, max_y = min([p[1] for p in trail]), max([p[1] for p in trail])
-                            box_w, box_h = max_x - min_x, max_y - min_y
-                            
-                            if box_w > 80 and box_h > 80 and 0.7 < (box_w / box_h) < 1.3:
-                                if math.hypot(trail[0][0] - trail[-1][0], trail[0][1] - trail[-1][1]) < 60:
-                                    os.system("rofi -show drun -show-icons -theme ~/.config/rofi/gesture.rasi &")
-                                    last_rofi_time = current_time
-                                    trail.clear()  
+                        # Just draw the pointer, no trail needed!
+                        cv2.circle(img, (ix, iy), 15, (0, 255, 255), cv2.FILLED)
 
                         dist_left = math.hypot(thumb_tip.x - index_base.x, thumb_tip.y - index_base.y)
                         dist_right = math.hypot(thumb_tip.x - middle_tip.x, thumb_tip.y - middle_tip.y)
@@ -379,30 +374,28 @@ try:
                                         os.system("ydotool click 0xC1") # Clean Atomic Right Click
                                         last_click_time = current_time
 
+                        # --- MOUSE MOVEMENT ---
                         if pointer_prev_x is None: pointer_prev_x, pointer_prev_y = ix, iy
                         move_x, move_y = (ix - pointer_prev_x) * SENSITIVITY, (iy - pointer_prev_y) * SENSITIVITY
                         
                         if abs(move_x) > DEADZONE or abs(move_y) > DEADZONE:
                             os.system(f"ydotool mousemove -- {int(move_x)} {int(move_y)}")
-                        pointer_prev_x, pointer_prev_y = ix, iy
+                        pointer_prev_x, pointer_prev_y = ix, iy 
 
                     elif index_curled and middle_curled and ring_curled and pinky_curled and thumb_tip.y < index_base.y - 0.08:
                         pointer_prev_x = None 
-                        trail.clear()
                         if current_time - last_enter_time > COOLDOWN:
                             os.system("ydotool key 28:1 28:0")
                             last_enter_time = current_time
 
                     elif index_curled and middle_curled and ring_curled and pinky_up:
                         pointer_prev_x = None 
-                        trail.clear()
                         if current_time - last_esc_time > COOLDOWN:
                             os.system("ydotool key 1:1 1:0") 
                             last_esc_time = current_time
 
                     elif index_up and middle_up and ring_up_strict and pinky_down:
                         pointer_prev_x = None 
-                        trail.clear()
                         avg_y = (index_tip.y + middle_tip.y + ring_tip.y) / 3
                         if 'close_prev_y' in locals() and (current_time - last_close_time > COOLDOWN):
                             if avg_y - close_prev_y > SWIPE_Y_THRESHOLD:
@@ -412,51 +405,59 @@ try:
                                 continue
                         close_prev_y = avg_y
 
+                    # --- TWO-FINGER OMNI-SWIPE (Workspaces & Waybar) ---
                     elif index_up and middle_up and ring_down and pinky_down:
                         pointer_prev_x = None 
-                        trail.clear()
-                        avg_y = (index_tip.y + middle_tip.y) / 2
-                        if 'waybar_prev_y' in locals() and (current_time - last_waybar_time > COOLDOWN):
-                            if abs(avg_y - waybar_prev_y) > SWIPE_Y_THRESHOLD:
-                                os.system("killall -SIGUSR1 waybar")
-                                last_waybar_time = current_time
-                                waybar_prev_y = avg_y
-                                continue
-                        waybar_prev_y = avg_y
-
-                    elif index_curled and middle_curled and ring_down and pinky_down:
-                        pointer_prev_x = None 
-                        trail.clear()
                         
-                        # Fix: Lock the starting position the moment the fist is made
+                        # Anchor point is the middle of the peace sign
+                        anchor_x = (index_tip.x + middle_tip.x) / 2
+                        anchor_y = (index_tip.y + middle_tip.y) / 2
+                        ix, iy = int(anchor_x * w), int(anchor_y * h)
+                        
+                        # VISUAL FEEDBACK
+                        cv2.circle(img, (ix, iy), 25, (255, 0, 255), 4)
+                        cv2.putText(img, "SWIPE", (ix - 40, iy - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+                        
+                        # Lock starting position the moment the gesture is made
                         if fist_start_time == 0: 
                             fist_start_time = current_time
-                            grab_prev_x = hand_landmarks[9].x 
+                            grab_prev_x = anchor_x 
+                            grab_prev_y = anchor_y
                             
-                        if current_time - fist_start_time > FIST_HOLD_TIME:
-                            anchor = hand_landmarks[9]
-                            
-                            if 'grab_prev_x' in locals() and (current_time - last_workspace_time > COOLDOWN):
-                                delta_x = anchor.x - grab_prev_x
+                        # Add a tiny 0.1s delay to let your hand stabilize
+                        if current_time - fist_start_time > 0.1:
+                            if 'grab_prev_x' in locals() and 'grab_prev_y' in locals():
+                                delta_x = anchor_x - grab_prev_x
+                                delta_y = anchor_y - grab_prev_y
                                 
-                                if delta_x < -SWIPE_X_THRESHOLD:
-                                    os.system("hyprctl dispatch workspace e-1 &") # Added & to prevent lag
-                                    last_workspace_time = current_time
+                                # --- HORIZONTAL: Workspace Switching ---
+                                if abs(delta_x) > SWIPE_X_THRESHOLD and abs(delta_x) > abs(delta_y):
+                                    if current_time - last_workspace_time > COOLDOWN:
+                                        if delta_x < 0:
+                                            subprocess.Popen(["hyprctl", "dispatch", "workspace", "e-1"])
+                                        else:
+                                            subprocess.Popen(["hyprctl", "dispatch", "workspace", "e+1"])
+                                        last_workspace_time = current_time
+                                        
+                                # --- VERTICAL: Waybar Toggle ---
+                                elif abs(delta_y) > SWIPE_Y_THRESHOLD and abs(delta_y) > abs(delta_x):
+                                    if current_time - last_waybar_time > COOLDOWN:
+                                        subprocess.Popen(["killall", "-SIGUSR1", "waybar"])
+                                        last_waybar_time = current_time
                                     
-                                elif delta_x > SWIPE_X_THRESHOLD:
-                                    os.system("hyprctl dispatch workspace e+1 &") # Added & to prevent lag
-                                    last_workspace_time = current_time
-                                    
-                            grab_prev_x = anchor.x
-                            
+                            # Update memory every frame so it tracks continuous movement!
+                            grab_prev_x = anchor_x
+                            grab_prev_y = anchor_y
+
                     else:
                         fist_start_time = 0
                         pointer_prev_x = None
-                        trail.clear()
                         
                         # Fix: Erase the old anchor memory when the hand opens!
                         if 'grab_prev_x' in locals():
                             del grab_prev_x 
+                        if 'grab_prev_y' in locals():
+                            del grab_prev_y 
                         
                         # SAFETY CATCH: Release mouse buttons
                         if left_is_holding:
