@@ -1,5 +1,6 @@
 # gesture-control
 using hand gestures to control pc  
+Check out this [demonstration](https://www.canva.com/design/DAHFFWuBo9k/bH8l-MCYc_JHr-3WQupwSg/view?utm_content=DAHFFWuBo9k&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h2e69470079).
   
 - 2 fingers swipe up/down = toggle waybar
 - thumb tap below index finger = left click

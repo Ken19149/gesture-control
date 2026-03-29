@@ -81,7 +81,7 @@ CLICK_COOLDOWN = 0.3
 ROFI_COOLDOWN = 2.0       
 FIST_HOLD_TIME = 0.2  
 SWIPE_Y_THRESHOLD = 0.08  
-SWIPE_X_THRESHOLD = 0.15  
+SWIPE_X_THRESHOLD = 0.25  
 CLICK_THRESHOLD = 0.04    
 TUCK_THRESHOLD = 0.08  
 PIANO_THRESHOLD = 0.03
@@ -427,22 +427,36 @@ try:
                     elif index_curled and middle_curled and ring_down and pinky_down:
                         pointer_prev_x = None 
                         trail.clear()
-                        if fist_start_time == 0: fist_start_time = current_time
+                        
+                        # Fix: Lock the starting position the moment the fist is made
+                        if fist_start_time == 0: 
+                            fist_start_time = current_time
+                            grab_prev_x = hand_landmarks[9].x 
+                            
                         if current_time - fist_start_time > FIST_HOLD_TIME:
                             anchor = hand_landmarks[9]
+                            
                             if 'grab_prev_x' in locals() and (current_time - last_workspace_time > COOLDOWN):
                                 delta_x = anchor.x - grab_prev_x
+                                
                                 if delta_x < -SWIPE_X_THRESHOLD:
-                                    os.system("hyprctl dispatch workspace e-1")
+                                    os.system("hyprctl dispatch workspace e-1 &") # Added & to prevent lag
                                     last_workspace_time = current_time
+                                    
                                 elif delta_x > SWIPE_X_THRESHOLD:
-                                    os.system("hyprctl dispatch workspace e+1")
+                                    os.system("hyprctl dispatch workspace e+1 &") # Added & to prevent lag
                                     last_workspace_time = current_time
+                                    
                             grab_prev_x = anchor.x
+                            
                     else:
                         fist_start_time = 0
                         pointer_prev_x = None
                         trail.clear()
+                        
+                        # Fix: Erase the old anchor memory when the hand opens!
+                        if 'grab_prev_x' in locals():
+                            del grab_prev_x 
                         
                         # SAFETY CATCH: Release mouse buttons
                         if left_is_holding:
